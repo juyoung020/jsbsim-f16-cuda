@@ -44,7 +44,7 @@ JSBSim `run()` 한 번의 결과를 읽으면 **행 k = (상태 S_k, 그 S_k 에
     python -m jsbsim_f16_cuda.fdm_verify --dtype float32   # float32 정밀도로
     python -m jsbsim_f16_cuda.fdm_verify --prog ail_step --trace wdot,cgz
 
-이 방법으로 찾아 고친 것 (`docs/frame_parity.md`):
+이 방법으로 찾아 고친 것 (`docs/porting_notes.md`, 방법과 결과는 `docs/verification.md`):
 
     코리올리 계수 2 누락        v_dot 3.4e-2 -> 1.4e-6 ft/s^2
     자전 원심가속도 누락        w_dot 7.0e-2 -> 2.0e-4 ft/s^2
@@ -74,6 +74,8 @@ from jsbsim_f16_cuda.f16_reference import JSBSimF16Ref  # noqa: E402
 FT = 0.3048
 R_EARTH = 6371000.0
 DT = 1.0 / 120.0
+#: `--negative` (음성 대조).  `seed()` 가 읽는다.
+NEGATIVE = False
 LBF, LBFFT, SLUG, SLUGFT2 = FC.LBF, FC.LBFFT, FC.SLUG, FC.SLUGFT2
 
 #: 읽어 오는 JSBSim 프로퍼티.  이름은 GPU 쪽 기록 키와 맞춘다.
@@ -234,6 +236,10 @@ def seed(dyn, rows, W, prog, lat0, lon0):
     dyn._engine_trim.zero_()          # 트림 프레임이 아니다
     if hasattr(dyn, "_trim_frame"):
         dyn._trim_frame.zero_()
+    if NEGATIVE:
+        # 음성 대조: 실제로 있었던 버그 하나(자전 원심가속도 연직 몫 누락, g 의 0.2 %)를
+        # 일부러 되살린다.  대조가 이것을 못 잡으면 대조가 쓸모없는 것이다.
+        dyn.rb.a_cent_ned.zero_()
 
 
 #: `_substep` 의 carry.  `ff_pps` 는 2026-09-23 에 생겼다 -- 그 전 커밋에도
@@ -343,6 +349,32 @@ def run_gpu(prog, frames, rows, W, dtype, device="cpu", plant="stick", ref="std"
     return out
 
 
+def run_fused(prog, frames, rows, W, dtype, device="cuda", plant="stick", ref="std", be=None):
+    """같은 대조를 **CUDA 융합 커널**로 (`fused_core.py`).
+
+    심는 것은 `seed()` 그대로다 -- 커널이 torch 플랜트의 상태 텐서를 제자리에서 읽고
+    쓰기 때문이다.  중간량은 커널의 디버그 버퍼에서 이 파일의 키 이름 그대로 읽는다.
+
+    F16Stick: 프레임 j 의 힘은 스틱 prog(W+j) 로 잰다 (`run_gpu` 가 `_substep` 에 주는
+    것과 같다).  커널은 **들고 있던** 스틱으로 힘을 재므로 프레임마다 그 버퍼에 넣고 한
+    프레임씩 부른다.
+    """
+    from jsbsim_f16_cuda import fused_core as FK
+    dyn = make_plant(plant, ref, be, rows, W, dtype, "cuda")
+    seed(dyn, rows, W, prog, be._lat0, be._lon0)
+    out = []
+    if isinstance(dyn, FC.F16Stick):
+        fz = FK.FusedStick(dyn)
+        for j in range(frames):
+            u = torch.tensor([prog(W + j)] * dyn.N, dtype=dtype, device="cuda")
+            dyn.stick.copy_(u)
+            dbg = torch.zeros(dyn.N, 1, FK.NDBG, dtype=dtype, device="cuda")
+            fz.step(u, 1, dbg=dbg)
+            d = dbg[0, 0].double().cpu().numpy()
+            out.append({k: float(d[i]) for i, k in enumerate(FK.DBG_KEYS)})
+        return out
+
+
 # ---------------------------------------------------------------- 대조
 
 #: 힘·FCS·보조량·질량 -- GPU 프레임 j 가 JSB 행 W+j 와 짝이다.
@@ -389,7 +421,13 @@ def main() -> int:
     ap.add_argument("--trace", default="")
     ap.add_argument("--check", action="store_true", help="임계 넘으면 exit 1")
     ap.add_argument("--lat", type=float, default=0.0, help="std 기준의 위도 [deg]")
+    ap.add_argument("--negative", action="store_true",
+                    help="음성 대조: 원심가속도 항을 일부러 빼고 대조가 그것을 잡는지 본다")
+    ap.add_argument("--fused", action="store_true",
+                    help="torch 플랜트 대신 CUDA 융합 커널을 대조한다 (cuda 필요)")
     a = ap.parse_args()
+    global NEGATIVE
+    NEGATIVE = a.negative
     plant = getattr(a, "plant", "stick")
     ref = getattr(a, "ref", "") or ("std" if plant == "stick" else "gym")
 
@@ -405,7 +443,8 @@ def main() -> int:
     print("=" * 78)
     print(f"비행모델 프레임 단위 대조 (원시 조종입력, dtype={a.dtype}, "
           f"심은 프레임 {a.warm}, {a.frames} 프레임 대조, 플랜트 {plant}, 기준 {ref}"
-          + (f", 위도 {a.lat:g}" if ref == "std" else "") + ")")
+          + (f", 위도 {a.lat:g}" if ref == "std" else "")
+          + (", CUDA 융합 커널" if a.fused else "") + ")")
     print("=" * 78)
     for v0, h0 in conds:
         print(f"\n--- v0={v0:.0f} kt  h0={h0:.0f} ft ---")
@@ -414,7 +453,8 @@ def main() -> int:
         for pn in progs:
             prog = PROGS[pn]
             jr, be = run_jsb(prog, a.warm + a.frames + 2, v0, h0, ref, a.lat)
-            gr = run_gpu(prog, a.frames, jr, a.warm, dtype, plant=plant, ref=ref, be=be)
+            run = run_fused if a.fused else run_gpu
+            gr = run(prog, a.frames, jr, a.warm, dtype, plant=plant, ref=ref, be=be)
             e = compare(jr, gr, a.warm, a.frames)
             fcs = max(e[k][0].max() for k in
                       ("ele_pos", "ail_pos", "rud_pos", "lef_pos", "sb_pos"))
@@ -442,6 +482,11 @@ def main() -> int:
         flag = "" if worst[k] <= lim else "   <-- 임계 초과"
         bad += worst[k] > lim
         print(f"  {k:<10}{worst[k]:>14.3e}{lim:>12.0e}   {where[k]}{flag}")
+    if a.negative:
+        # 일부러 넣은 버그를 잡아야(= 임계를 넘어야) 성공이다.
+        print(f"\n음성 대조: " + (f"잡았다 -- {bad} 개 항목이 임계를 넘었다 (정상)" if bad
+                                  else "못 잡았다 (대조가 무디다)"))
+        return 0 if bad else 1
     if a.check:
         print(f"\n{'통과' if not bad else f'실패 -- {bad} 개 항목이 임계를 넘었다'}")
         return 1 if bad else 0

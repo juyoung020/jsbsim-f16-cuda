@@ -1,7 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""TankMass 대 JSBSim 점검.
+"""TankMass 대 JSBSim 점검, CUDA 커널 대 torch 점검.
 
     python -m jsbsim_f16_cuda.f16_check mass
+    python -m jsbsim_f16_cuda.f16_check fused     # 커널 대 torch F16Stick (float64 / float32)
+
+`mass`:
 
   1. 정적: 탱크 네 개에 무작위 연료를 넣고 `run_ic()` 한 뒤 JSBSim 의 weight, cg,
      ixx/iyy/izz/ixz 와 `TankMass.props` 를 비교한다.
@@ -107,17 +110,98 @@ def check_mass(n_static: int, frames: int, seed: int) -> int:
     return 1 if bad else 0
 
 
+def check_fused(n: int, steps: int, seed: int) -> int:
+    """CUDA 커널(`fused_core.attach_stick`) 대 torch F16Stick.
+
+    두 가지로 잰다.
+      매 스텝 맞춤  스텝마다 커널 쪽 상태를 torch 상태로 덮어쓴 뒤 같은 조종으로 1~6 프레임.
+                    누적이 없으니 남는 차이는 식의 차이다.
+      자유 비행     처음에만 맞추고 `steps` 스텝을 따로 날린다 (float64 에서 반올림이 쌓이는 정도).
+    구성: 탱크 질량 급유 끔 (위도 0), 급유 켬 (위도 60).  float64 와 float32.
+    """
+    import torch
+    from jsbsim_f16_cuda.f16_core import F16Stick
+    from jsbsim_f16_cuda import fused_core as FK
+    if not torch.cuda.is_available():
+        print("CUDA 가 없어 건너뛴다")
+        return 0
+    gen = torch.Generator(device="cuda").manual_seed(seed)
+    bad = 0
+    print(f"CUDA 커널 대 torch F16Stick ({n} 대, 스텝마다 1~6 프레임 무작위 조종, 상대오차 = "
+          f"|차| / 그 상태의 최대 |값|)")
+    for dt in (torch.float64, torch.float32):
+        for tag, kw in (("급유 끔, 위도 0", dict(lat0_deg=0.0)),
+                        ("급유 켬, 위도 60", dict(lat0_deg=60.0, refuel=True))):
+            ta, tb = F16Stick(n, "cuda", dt, **kw), F16Stick(n, "cuda", dt, **kw)
+            pos = torch.zeros(n, 3, device="cuda", dtype=dt)
+            pos[:, 2] = -(1500.0 + 9000.0 * torch.rand(n, device="cuda", dtype=dt, generator=gen))
+            psi = torch.rand(n, device="cuda", dtype=dt, generator=gen) * 6.2 - 3.1
+            vt = 130.0 + 180.0 * torch.rand(n, device="cuda", dtype=dt, generator=gen)
+            fuel = torch.rand(n, 4, device="cuda", dtype=dt, generator=gen) * torch.tensor(
+                [3486.0, 3486.0, 2991.0, 2991.0], device="cuda", dtype=dt)
+            for d in (ta, tb):
+                d.reset(pos, psi, vt, fuel)
+            FK.attach_stick(tb)
+
+            def sync():
+                for k, t in tb.watched_tensors().items():
+                    if t.numel():
+                        t.copy_(ta.watched_tensors()[k])
+
+            def diff():
+                w = 0.0
+                for k, x in ta.watched_tensors().items():
+                    y = tb.watched_tensors()[k]
+                    if not x.numel() or x.dtype == torch.bool:
+                        if x.numel() and bool((x != y).any()):
+                            return float("inf")
+                        continue
+                    w = max(w, float((x.double() - y.double()).abs().max()
+                                     / (x.double().abs().max() + 1e-12)))
+                return w
+
+            def stick():
+                u = torch.rand(n, 4, device="cuda", dtype=dt, generator=gen) * 2 - 1
+                u[:, 3] = u[:, 3].abs()
+                return u
+
+            step_w = 0.0
+            for i in range(steps):
+                sync()
+                u, sub = stick(), 1 + i % 6
+                F16Stick.step(ta, u, sub)
+                tb.step(u, sub)
+                step_w = max(step_w, diff())
+            ta.reset(pos, psi, vt, fuel)
+            sync()
+            for i in range(steps):
+                u, sub = stick(), 1 + i % 6
+                F16Stick.step(ta, u, sub)
+                tb.step(u, sub)
+            free_w = diff()
+            lim = 1e-11 if dt == torch.float64 else 1e-3   # float32: 반올림 + 포화 분기
+            flag = step_w > lim
+            bad += flag
+            name = "float64" if dt == torch.float64 else "float32"
+            print(f"  {name}  {tag:<14} 매 스텝 맞춤 최대 {step_w:.1e}   "
+                  f"자유 비행 {steps} 스텝 뒤 {free_w:.1e}{'   <-- 임계 초과' if flag else ''}")
+    print("통과" if not bad else f"실패 {bad} 건")
+    return 1 if bad else 0
+
+
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("what", choices=("mass", "reference"))
+    ap.add_argument("what", choices=("mass", "fused", "reference"))
     ap.add_argument("--n", type=int, default=200)
     ap.add_argument("--frames", type=int, default=2400)
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
     if a.what == "mass":
         return check_mass(a.n, a.frames, a.seed)
+    if a.what == "fused":
+        return check_fused(a.n if a.n != 200 else 512, 60, a.seed)
 
 
 if __name__ == "__main__":
