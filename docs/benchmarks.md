@@ -96,9 +96,31 @@ everything else:
 If the simulator is a fraction `p` of your current training time, the end-to-end speedup is
 at most `1 / (1 − p)`, however fast the simulator becomes.
 
-**One example, not a guarantee.**  A private PPO pipeline built on the same kernel: PPO,
-1024×2 MLP policy, about 65,500 parallel two-aircraft episodes, 96 decision steps of 6
-physics frames per iteration (≈ 6.3 M decision steps), 4 epochs, the same RTX 5070 Ti:
+### Example 1: CPU training → GPU training
+
+**One example, not a guarantee.**  The same private PPO trainer with the same 256×2 MLP
+policy on the same PC (Ryzen 9 9950X, RTX 5070 Ti), first with JSBSim 1.3.0 on the CPU, then
+with this simulator's torch backend (+ CUDA graph) on the GPU:
+
+| training pipeline | env-steps/s, end-to-end | vs. CPU pipeline |
+|---|---|---|
+| JSBSim 1.3.0 in 28 worker processes (Stable-Baselines3 `SubprocVecEnv`); rollout on CPU, updates on GPU | ≈ 4,200 | 1× |
+| GPU simulator, 65,472 parallel environments, minibatch 65,536; full-iteration benchmark (rollout + update) | 525,692 | 125× |
+| same, in a long training run (extra network updates each iteration) | ≈ 317,000 | ≈ 76× |
+
+An env-step is one decision step of one two-aircraft episode: 2 aircraft × 6 physics frames.
+These ratios are **end-to-end**, not the physics alone, and most of the gain does not come
+from the physics being faster: in the GPU pipeline the simulator was already a small share of
+each step's cost.  It comes from what a GPU simulator makes possible — tens of thousands of
+parallel environments in one process and large minibatches (the same GPU pipeline at 4,080
+environments and 16,384-sample minibatches was much slower) — with rollout and update both
+staying on the GPU.
+
+### Example 2: torch backend → CUDA kernel
+
+Later, in a larger pipeline on the same machine — PPO, 1024×2 MLP policy, about 65,500
+parallel two-aircraft episodes, 96 decision steps of 6 physics frames per iteration
+(≈ 6.3 M decision steps), 4 epochs — only the physics backend was switched:
 
 | physics backend in the same pipeline | one training iteration |
 |---|---|

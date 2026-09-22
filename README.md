@@ -51,12 +51,21 @@ rewards and the learning algorithm:
 `speedup = (T_sim_old + T_rest) / (T_sim_new + T_rest)` — if the simulator is a fraction
 `p` of your current training time, the speedup is at most `1 / (1 − p)`.
 
-One example, not a guarantee: a private PPO pipeline on this kernel (1024×2 MLP policy,
-≈ 65,500 parallel two-aircraft episodes, 96 decision steps × 6 frames per iteration, 4 epochs,
-same RTX 5070 Ti) went from about 19.0 s to about 15.6 s per iteration when its physics moved
-from the torch backend to the kernel; physics is now about 26 ms (0.2 %) of the iteration.
-The bottleneck moves to the learning side and the simulator cost all but disappears.
-[Details](docs/benchmarks.md#simulator-vs-end-to-end-training).
+One example, not a guarantee — the same private PPO trainer (256×2 MLP policy) on the same
+PC, first with JSBSim on the CPU, then with this simulator on the GPU (torch backend + CUDA graph):
+
+| training pipeline | env-steps/s, end-to-end | vs. CPU pipeline |
+|---|---|---|
+| JSBSim 1.3.0, 28 worker processes (SB3 `SubprocVecEnv`); rollout on CPU, updates on GPU | ≈ 4,200 | 1× |
+| GPU simulator, 65,472 parallel environments, minibatch 65,536 (full-iteration benchmark) | 525,692 | 125× |
+| same, long training run (extra network updates per iteration) | ≈ 317,000 | ≈ 76× |
+
+An env-step is one decision step of one two-aircraft episode (2 aircraft × 6 physics frames).
+The 125× is end-to-end, not the physics alone: most of it comes from what a GPU simulator makes
+possible — tens of thousands of parallel environments and large minibatches — while the physics
+was already a small share of each step.  Switching that physics to the CUDA kernel later (in a
+larger 1024×2-policy pipeline) cut an iteration from about 19.0 s to about 15.6 s and left the
+physics at about 0.2 % of it.  [Details](docs/benchmarks.md#simulator-vs-end-to-end-training).
 
 ## Quick start
 
