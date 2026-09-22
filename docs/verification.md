@@ -40,7 +40,7 @@ row off makes an exact FCS look 1e-3 wrong.
 | what | row |
 |---|---|
 | position, velocity, attitude, rates | W |
-| Adams-Bashforth history (velocity, position derivatives) | W−1, W−2, W−3 |
+| Adams-Bashforth history (inertial-frame velocity and position derivatives) | W−1, W−2, W−3 |
 | FLCS delay buffers (9) and surface positions (3) | W−1 |
 | N2, fuel flow | W−1 |
 | previous specific force and angular acceleration (pilot load factor) | W−1 |
@@ -73,6 +73,12 @@ component is absorbed in the geodetic vertical, which is exact only at the refer
 point).  float32 differences are rounding (eps 1.2e-7); `--check` thresholds are set for
 float64, so a float32 run reports four items above threshold by design.
 
+**What these input programs do not exercise.**  They hold each stick input for at least 8
+frames, so the integrator history is smooth.  One discrepancy was found only on rapidly
+rolling flight: integrating velocity in body axes instead of the inertial frame
+([porting_notes.md](porting_notes.md), item 6) — up to 0.10 ft/s per frame there, yet around
+1e-6 in this table.  It is fixed; the numbers above did not change.
+
 **Negative control.**  `fdm_verify --negative` deliberately removes one real bug fix (the
 vertical centrifugal term, 0.2 % of g).  The check then fails on u̇, v̇ and ẇ (ẇ off by
 0.11 ft/s², 100 times its threshold), for both the torch backend and the kernel.  A
@@ -86,8 +92,8 @@ comparison that could not catch that would be useless.
 
 | | re-synchronised every step (max) | free flight, 60 steps |
 |---|---|---|
-| float64 | 5.3e-14 | 1.8e-14 |
-| float32 | 1.0e-4 | 1.5e-5 |
+| float64 | 5.3e-14 | 4.5e-13 |
+| float32 | 8.5e-5 | 3.6e-4 |
 
 The kernel is not bit-identical to torch: torch rounds after every operation and sums the
 aerodynamic axes with a matrix product.  `--fmad=false` keeps the kernel from fusing

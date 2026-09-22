@@ -26,9 +26,10 @@ JSBSim `run()` 한 번의 결과를 읽으면 **행 k = (상태 S_k, 그 S_k 에
 상태만으로는 부족하다.  둘 다 한 프레임 이상의 이력을 들고 있다:
 
     rb.pos_ned/uvw/quat/pqr         행 W
-    rb._hist["uvw"]/["pos"]         Adams-Bashforth 과거 미분값.  `_push` 가
-                                    [2]<-[1], [1]<-[0] 순으로 미므로 **[0] 에
-                                    직전 프레임**을 넣어야 한다
+    rb._hist["uvw"]/["pos"]         Adams-Bashforth 과거 미분값 (속도 칸은 **국소 NED**
+                                    속도 미분이다 -- 속도를 관성계에서 적분한다).
+                                    `_push` 가 [2]<-[1], [1]<-[0] 순으로 미므로
+                                    **[0] 에 직전 프레임**을 넣어야 한다
     flcs 지연버퍼 9 개 + 면 위치 3 개  행 W-1 (FLCS 가 스스로 한 프레임 미룬다)
     n2, ff_pps                      행 W-1 (`turbine.step` 이 W 로 올린다)
     a_body, wdot_i                  행 W-1 (조종석 하중배수가 한 프레임 지연)
@@ -181,6 +182,20 @@ def run_jsb(prog, frames, v0, h0, kind="std", lat=0.0):
 
 
 
+def _a_ned(row, dev, dt) -> torch.Tensor:
+    """JSB 행의 동체축 미분 -> 국소 NED 속도 미분 [ft/s^2].  (3,)"""
+    ph, th, ps = row["phi"], row["theta"], row["psi"]
+    cf, sf, ct, st, cp, sp = (math.cos(ph), math.sin(ph), math.cos(th),
+                              math.sin(th), math.cos(ps), math.sin(ps))
+    b2l = torch.tensor([[ct * cp, sf * st * cp - cf * sp, cf * st * cp + sf * sp],
+                        [ct * sp, sf * st * sp + cf * cp, cf * st * sp - sf * cp],
+                        [-st, sf * ct, cf * ct]], device=dev, dtype=dt)
+    u, v, w, p, q, r = (row[k] for k in ("u", "v", "w", "p", "q", "r"))
+    ab = torch.tensor([row["udot"] + (q * w - r * v), row["vdot"] + (r * u - p * w),
+                       row["wdot"] + (p * v - q * u)], device=dev, dtype=dt)
+    return b2l @ ab
+
+
 def seed(dyn, rows, W, prog, lat0, lon0):
     """JSB 행 W 의 상태(와 한 프레임 이력)를 플랜트에 심는다.  `lat0/lon0` [rad] 는 평면 원점."""
     dev, dt = dyn.device, dyn.dtype
@@ -196,10 +211,12 @@ def seed(dyn, rows, W, prog, lat0, lon0):
     dyn.rb.quat.copy_(RB.quat_from_euler(t(cur["phi"]), t(cur["theta"]),
                                          t(cur["psi"])))
     # Adams-Bashforth 이력.  `_push` 가 한 칸 밀므로 **[0] 이 직전 프레임**이다.
+    # 속도 이력은 **국소 NED 좌표의 속도 미분**이다 (`rbdyn` 머리말 1 -- JSBSim 은
+    # 관성계에서 속도를 적분한다).  JSB 가 주는 동체축 미분에 pqr x uvw 를 더해
+    # 그 행의 자세로 NED 에 돌린다.
     hu, hp = dyn.rb._hist["uvw"], dyn.rb._hist["pos"]
     for slot, row in ((0, prv), (1, pr2), (2, pr3)):
-        hu[slot].copy_(torch.stack((t(row["udot"] * FT), t(row["vdot"] * FT),
-                                    t(row["wdot"] * FT)), -1))
+        hu[slot].copy_((_a_ned(row, dev, dt) * FT).expand(dyn.N, 3))
         hp[slot].copy_(torch.stack((t(row["vn"] * FT), t(row["ve"] * FT),
                                     t(row["vd"] * FT)), -1))
     dyn.rb._fresh.fill_(False)

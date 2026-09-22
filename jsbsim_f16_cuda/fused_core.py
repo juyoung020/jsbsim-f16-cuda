@@ -720,13 +720,19 @@ __device__ __forceinline__ void core_post(Core& c, const Pre& s, const Env& E,
     REAL qdx = (REAL)0.5 * (c.qw * p + c.qy * r - c.qz * q);
     REAL qdy = (REAL)0.5 * (c.qw * q + c.qz * p - c.qx * r);
     REAL qdz = (REAL)0.5 * (c.qw * r + c.qx * q - c.qy * p);
-    // AB 이력 (방금 리셋된 판은 세 칸 모두 현재 값)
+    // 속도는 **국소 NED 에서** 적분한다 (JSBSim 은 관성계 -- rbdyn 머리말 1).
+    // a_ned = Tb2l (uvw_dot + pqr x uvw) : 지구 기준 속도의 NED 미분
+    REAL abx = udot + (q * w - r * v), aby = vdot + (r * u - p * w), abz = wdot + (p * v - q * u);
+    REAL anN = T[0] * abx + T[3] * aby + T[6] * abz;
+    REAL anE = T[1] * abx + T[4] * aby + T[7] * abz;
+    REAL anD = T[2] * abx + T[5] * aby + T[8] * abz;
+    // AB 이력 (방금 리셋된 판은 세 칸 모두 현재 값).  hu* 는 NED 속도 미분이다.
     c.hu2x = c.hu1x; c.hu2y = c.hu1y; c.hu2z = c.hu1z; c.hu1x = c.hu0x; c.hu1y = c.hu0y; c.hu1z = c.hu0z;
-    c.hu0x = udot; c.hu0y = vdot; c.hu0z = wdot;
+    c.hu0x = anN; c.hu0y = anE; c.hu0z = anD;
     c.hp2x = c.hp1x; c.hp2y = c.hp1y; c.hp2z = c.hp1z; c.hp1x = c.hp0x; c.hp1y = c.hp0y; c.hp1z = c.hp0z;
     c.hp0x = s.vn; c.hp0y = s.ve; c.hp0z = s.vd;
     if (c.fr) {
-        c.hu1x = c.hu2x = udot; c.hu1y = c.hu2y = vdot; c.hu1z = c.hu2z = wdot;
+        c.hu1x = c.hu2x = anN; c.hu1y = c.hu2y = anE; c.hu1z = c.hu2z = anD;
         c.hp1x = c.hp2x = s.vn; c.hp1y = c.hp2y = s.ve; c.hp1z = c.hp2z = s.vd;
     }
     if (d) {
@@ -746,9 +752,16 @@ __device__ __forceinline__ void core_post(Core& c, const Pre& s, const Env& E,
         REAL nq = cmin(SQRT(c.qw * c.qw + c.qx * c.qx + c.qy * c.qy + c.qz * c.qz), (REAL)1e-12);
         c.qw = c.qw / nq; c.qx = c.qx / nq; c.qy = c.qy / nq; c.qz = c.qz / nq;
     }
-    c.u = u + DT * ((REAL)1.5 * c.hu0x - (REAL)0.5 * c.hu1x);
-    c.v = v + DT * ((REAL)1.5 * c.hu0y - (REAL)0.5 * c.hu1y);
-    c.w = w + DT * ((REAL)1.5 * c.hu0z - (REAL)0.5 * c.hu1z);
+    {
+        // NED 속도를 AB2 로 밀고 **적분한 뒤의** 자세로 동체축에 되돌린다.
+        REAL vn1 = s.vn + DT * ((REAL)1.5 * c.hu0x - (REAL)0.5 * c.hu1x);
+        REAL ve1 = s.ve + DT * ((REAL)1.5 * c.hu0y - (REAL)0.5 * c.hu1y);
+        REAL vd1 = s.vd + DT * ((REAL)1.5 * c.hu0z - (REAL)0.5 * c.hu1z);
+        Dcm Tn = dcm_l2b(c.qw, c.qx, c.qy, c.qz);
+        c.u = Tn.t[0] * vn1 + Tn.t[1] * ve1 + Tn.t[2] * vd1;
+        c.v = Tn.t[3] * vn1 + Tn.t[4] * ve1 + Tn.t[5] * vd1;
+        c.w = Tn.t[6] * vn1 + Tn.t[7] * ve1 + Tn.t[8] * vd1;
+    }
     c.pn = c.pn + DT * ((AB3_0 * c.hp0x - AB3_1 * c.hp1x) + AB3_2 * c.hp2x);
     c.pe = c.pe + DT * ((AB3_0 * c.hp0y - AB3_1 * c.hp1y) + AB3_2 * c.hp2y);
     c.pd = c.pd + DT * ((AB3_0 * c.hp0z - AB3_1 * c.hp1z) + AB3_2 * c.hp2z);

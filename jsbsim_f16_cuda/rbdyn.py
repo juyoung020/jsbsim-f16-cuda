@@ -24,9 +24,17 @@ JSBSim 1.3.0 실측으로 확정한 사실
 1. 적분기 (JSBSim 기본값, dt = 1/120 s)::
 
        rate/rotational       RectEuler        (pqr)
-       rate/translational    AdamsBashforth2  (u,v,w)
+       rate/translational    AdamsBashforth2  (**관성계 속도**, u,v,w 가 아니다)
        position/rotational   RectEuler        (쿼터니언)
        position/translational AdamsBashforth3 (위치)
+
+   병진 속도는 **동체축이 아니라 관성계(국소 NED)에서** 적분한다 (`FGPropagate::Run`
+   이 관성 속도를 `vUVWidot` 으로 적분하고, 적분이 끝난 **새 자세**로 `vUVW` 를 다시
+   만든다).  동체축에서 AB2 를 돌리면 연속시간에서는 같은 식인데 이산 다단계법에서는
+   다르다 -- 과거 미분값이 **그때의 동체축** 좌표라, 기체가 도는 동안 그 사이
+   회전(omega*dt)만큼 틀린 방향으로 외삽된다.  빠르게 롤하는 비행에서 JSBSim 자기
+   기록으로 재면 동체축 AB2 는 프레임당 최대 0.10 ft/s 어긋나고, 국소 NED 의 AB2 는
+   2.4e-4 ft/s 로 맞는다 (남는 것은 평평한 지구의 수송률 V/R).
 
    그래서 `integrator="jsbsim"` 이 기본이다.  RK4 가 "더 정확"하지만 맞춰야 할
    기준은 참값이 아니라 **JSBSim 궤적**이다.
@@ -307,6 +315,11 @@ class RigidBody6DOF:
 
         # Adams-Bashforth 과거 미분값.  **미리 잡아 두고 제자리로만 갱신한다.**
         # (3, *batch, 3) -- [0] 이 가장 최근.
+        #
+        # 🔴 `"uvw"` 칸에 든 것은 **국소 NED 좌표의 속도 미분**(지구 기준 속도의
+        # 시간미분)이다 -- 동체축 `uvw_dot` 이 아니다.  JSBSim 이 관성계에서 속도를
+        # 적분하기 때문이다 (머리말 1).  이름은 붙어 있는 곳(융합 커널 인자,
+        # `fdm_verify.seed`)이 많아 그대로 뒀다.
         self._hist = {
             k: torch.zeros(self._HIST, *self.batch_shape, 3,
                            device=self.device, dtype=dtype)
@@ -493,17 +506,27 @@ class RigidBody6DOF:
             return
 
         # "jsbsim" 모드.  JSBSim 1.3.0 의 기본 조합을 그대로 흉내낸다:
-        #   pqr  RectEuler / quat RectEuler / uvw AB2 / pos AB3
+        #   pqr  RectEuler / quat RectEuler / 속도 AB2 (관성계) / pos AB3
         # 네 갈래의 미분값은 **전부 스텝 시작 상태에서** 한 번에 뽑는다
         # (위 `derivatives` 호출).  즉 자세는 갱신 전 pqr 로 굴러간다 --
         # 갱신된 pqr 을 쓰도록 바꾸면 JSBSim 과의 자세 오차가 커진다 (실측).
-        uvw_h = self._push("uvw", uvw_dot)
+        #
+        # 속도는 **국소 NED 에서** 적분하고 새 자세로 동체축에 되돌린다 (머리말 1).
+        #   a_ned = Tb2l (uvw_dot + pqr x uvw)       <- 지구 기준 속도의 NED 미분
+        #   v_ned' = v_ned + dt (1.5 a_ned[k] - 0.5 a_ned[k-1])
+        #   uvw'  = Tl2b(q') v_ned'                   <- **적분한 뒤의** 자세
+        # `pos_dot` 이 곧 v_ned (= Tb2l uvw) 다.
+        Tl2b = dcm_l2b(self.quat)
+        a_ned = torch.einsum("...ji,...j->...i", Tl2b,
+                             uvw_dot + torch.cross(self.pqr, self.uvw, dim=-1))
+        vel_h = self._push("uvw", a_ned)
         pos_h = self._push("pos", pos_dot)
 
         self.pqr.add_(pqr_dot, alpha=dt)
         self.quat.add_(q_dot, alpha=dt)
         self._renorm_quat()
-        self.uvw.add_(1.5 * uvw_h[0] - 0.5 * uvw_h[1], alpha=dt)
+        v_ned = pos_dot + dt * (1.5 * vel_h[0] - 0.5 * vel_h[1])
+        self.uvw.copy_(torch.einsum("...ij,...j->...i", dcm_l2b(self.quat), v_ned))
         self.pos_ned.add_(
             (23.0 / 12.0) * pos_h[0] - (16.0 / 12.0) * pos_h[1] + (5.0 / 12.0) * pos_h[2],
             alpha=dt)

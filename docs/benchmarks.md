@@ -16,6 +16,7 @@ what that means for a whole training loop see
 | this port | float32 unless stated; `step(stick, substeps=6)` per call (6 frames); each aircraft holds its own random stick and the fleet is re-trimmed every 10 s of flight (excluded from timing) so it keeps manoeuvring inside the envelope |
 | JSBSim | one `FGFDMExec` per process, trim at 20,000 ft / 450 kt then hold the trim controls; re-trim every 100 s of flight (excluded); processes started together behind a barrier |
 | timing | ≥ 3 s per measurement after warm-up; GPU numbers are the better of two runs (they differed by < 5 %) |
+| version | measured on v0.2.0.  The later fix that integrates velocity in the inertial frame adds one 3×3 rotation per frame; it has not been re-measured on an idle GPU |
 
 ## Summary (physics only)
 
