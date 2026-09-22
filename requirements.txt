@@ -1,0 +1,4 @@
+torch>=2.1
+numpy>=1.24
+# 검증 도구(fdm_verify, f16_check, f16_trim_build, validate_aero, rbdyn_validate)에만 필요
+jsbsim==1.3.0
