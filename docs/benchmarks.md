@@ -107,7 +107,6 @@ with this simulator's torch backend (+ CUDA graph) on the GPU:
 |---|---|---|
 | JSBSim 1.3.0 in 28 worker processes (Stable-Baselines3 `SubprocVecEnv`); rollout on CPU, updates on GPU | ≈ 4,200 | 1× |
 | GPU simulator, 65,472 parallel environments, minibatch 65,536; full-iteration benchmark (rollout + update) | 525,692 | 125× |
-| same, in a long training run (extra network updates each iteration) | ≈ 317,000 | ≈ 76× |
 
 An env-step is one decision step of one two-aircraft episode: 2 aircraft × 6 physics frames.
 These ratios are **end-to-end**, not the physics alone, and most of the gain does not come
