@@ -217,8 +217,8 @@ def seed(dyn, rows, W, prog, lat0, lon0):
     hu, hp = dyn.rb._hist["uvw"], dyn.rb._hist["pos"]
     for slot, row in ((0, prv), (1, pr2), (2, pr3)):
         hu[slot].copy_((_a_ned(row, dev, dt) * FT).expand(dyn.N, 3))
-        hp[slot].copy_(torch.stack((t(row["vn"] * FT), t(row["ve"] * FT),
-                                    t(row["vd"] * FT)), -1))
+        v_ned = torch.stack((t(row["vn"] * FT), t(row["ve"] * FT), t(row["vd"] * FT)), -1)
+        hp[slot].copy_(v_ned)
     dyn.rb._fresh.fill_(False)
     dyn.n2.copy_(t(prv["n2"]))
     dyn.n2norm.copy_((dyn.n2 - dyn.turbine.idle_n2) / dyn.turbine.n2_factor)

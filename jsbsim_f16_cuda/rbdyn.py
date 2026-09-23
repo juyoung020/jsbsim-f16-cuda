@@ -91,6 +91,9 @@ G0 = 32.1593872843476 * FT
 H_REF = 20000.0 * FT
 #: 지구 반지름 [m] (역제곱 중력·원심가속도의 r).
 R_EARTH = 6371000.0
+#: WGS84 타원체 (JSBSim `FGLocation` 과 같다).
+WGS84_A = 6378137.0
+WGS84_E2 = 6.69437999014e-3
 #: 지구 자전 각속도 [rad/s]
 OMEGA_EARTH = 7.2921151467e-5
 #: 위도를 안 주면 쓰는 기준 위도 [deg].  `G0` 가 이 위도의 값이다.
@@ -520,7 +523,8 @@ class RigidBody6DOF:
         a_ned = torch.einsum("...ji,...j->...i", Tl2b,
                              uvw_dot + torch.cross(self.pqr, self.uvw, dim=-1))
         vel_h = self._push("uvw", a_ned)
-        pos_h = self._push("pos", pos_dot)
+        pos_rate = pos_dot
+        pos_h = self._push("pos", pos_rate)
 
         self.pqr.add_(pqr_dot, alpha=dt)
         self.quat.add_(q_dot, alpha=dt)
@@ -530,6 +534,7 @@ class RigidBody6DOF:
         self.pos_ned.add_(
             (23.0 / 12.0) * pos_h[0] - (16.0 / 12.0) * pos_h[1] + (5.0 / 12.0) * pos_h[2],
             alpha=dt)
+
 
     def _renorm_quat(self) -> None:
         self.quat.div_(self.quat.norm(dim=-1, keepdim=True).clamp_min(1e-12))

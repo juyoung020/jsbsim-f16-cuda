@@ -17,7 +17,7 @@ JSBSim engine: other aircraft files will not run.
 """
 from .f16_core import F16Stick, TankMass, TrimGrid, gravity_j2_ms2  # noqa: F401
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 
 def attach_stick(dyn):

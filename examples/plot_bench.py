@@ -50,7 +50,9 @@ def main(src: str, dst: str) -> None:
     ax.set_xlim(min(vals) / 3, max(vals) * 60)
     for yi, (n, (v, _)) in zip(y, bars):
         txt = f"{v / 1e9:.2f} G/s" if v >= 1e9 else (f"{v / 1e6:.1f} M/s" if v >= 1e6 else f"{v / 1e3:.0f} k/s")
-        ax.text(v * 1.15, yi, f"{txt}   {v / base:,.0f}x", va="center", fontsize=9,
+        r = v / base
+        r = float(f"{r:.3g}")                     # 3 significant figures, like the tables
+        ax.text(v * 1.15, yi, f"{txt}   {r:,.0f}x", va="center", fontsize=9,
                 fontweight="bold" if n == "CUDA kernel" else "normal")
     ax.set_xlabel("aircraft-frames per second (1 frame = 1/120 s), log scale")
     gpu = (meta.get("gpu") or "").replace("NVIDIA GeForce ", "")

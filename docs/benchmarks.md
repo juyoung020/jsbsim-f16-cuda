@@ -10,13 +10,13 @@ what that means for a whole training loop see
 
 | | |
 |---|---|
-| GPU | NVIDIA GeForce RTX 5070 Ti (16 GB), no other compute jobs during the GPU runs (utilisation 0 – 16 % before and after) |
-| CPU | AMD Ryzen 9 9950X, 16 cores / 32 hardware threads; light background load (5 – 15 %) during the CPU runs |
+| GPU | NVIDIA GeForce RTX 5070 Ti (16 GB), no other compute jobs during the GPU runs (utilisation 0 % before and after) |
+| CPU | AMD Ryzen 9 9950X, 16 cores / 32 hardware threads; light background load (3 – 15 %) during the CPU runs |
 | software | Windows 11, Python 3.11, torch 2.11.0+cu128, JSBSim 1.3.0 (pip) |
 | this port | float32 unless stated; `step(stick, substeps=6)` per call (6 frames); each aircraft holds its own random stick and the fleet is re-trimmed every 10 s of flight (excluded from timing) so it keeps manoeuvring inside the envelope |
 | JSBSim | one `FGFDMExec` per process, trim at 20,000 ft / 450 kt then hold the trim controls; re-trim every 100 s of flight (excluded); processes started together behind a barrier |
-| timing | ≥ 3 s per measurement after warm-up; GPU numbers are the better of two runs (they differed by < 5 %) |
-| version | measured on v0.2.0.  The later fix that integrates velocity in the inertial frame adds one 3×3 rotation per frame; it has not been re-measured on an idle GPU |
+| timing | ≥ 3 s per measurement after warm-up; GPU numbers are the better of two runs (they differed by < 3 %) |
+| version | this port (CUDA kernel, torch GPU and CPU backends): 0.2.1, which integrates velocity in the inertial frame, measured 2026-09-24 (the fix cost about 5 % of kernel throughput: 3.09 G before).  JSBSim: measured 2026-09-23 |
 
 ## Summary (physics only)
 
@@ -24,28 +24,28 @@ what that means for a whole training loop see
 |---|---|---|---|---|---|
 | JSBSim 1.3.0, `run()` only | 1 process | 122 k | 8.2 µs | 49 µs | 1× |
 | JSBSim 1.3.0, `run()` only | 32 processes | 2.38 M | 0.42 µs | 2.5 µs | 20× |
-| torch CPU backend | 16,384 aircraft, 16 threads, float32 | 0.94 M | 1.1 µs | 6.4 µs | 7.7× |
-| torch GPU backend, eager | 262,144 aircraft | 22.2 M | 45 ns | 270 ns | 182× |
-| torch GPU backend, CUDA graph | 262,144 aircraft | 39.9 M | 25 ns | 150 ns | 327× |
-| **CUDA kernel** | 262,144 aircraft | **3.09 G** | **0.32 ns** | **1.9 ns** | **25,300×** |
+| torch CPU backend | 16,384 aircraft, 16 threads, float32 | 0.86 M | 1.2 µs | 7.0 µs | 7.0× |
+| torch GPU backend, eager | 262,144 aircraft | 18.9 M | 53 ns | 320 ns | 154× |
+| torch GPU backend, CUDA graph | 262,144 aircraft | 33.8 M | 30 ns | 180 ns | 277× |
+| **CUDA kernel** | 262,144 aircraft | **2.95 G** | **0.34 ns** | **2.0 ns** | **24,100×** |
 
 Cost per aircraft-frame = 1 / throughput, i.e. amortised over the whole batch (for JSBSim,
 over the processes).  It is the number to plug into the formula in the next section.
 
-Physics only, the kernel is **1,300×** JSBSim running on all 32 hardware threads of this
-CPU.  3.09 G aircraft-frames/s is 25.8 million aircraft at the real-time rate of 120 frames
+Physics only, the kernel is **1,240×** JSBSim running on all 32 hardware threads of this
+CPU.  2.95 G aircraft-frames/s is 24.5 million aircraft at the real-time rate of 120 frames
 per second.
 
 ## CUDA kernel and torch GPU backend, by batch size
 
 | aircraft | torch eager | torch + CUDA graph | CUDA kernel | kernel / graph |
 |---|---|---|---|---|
-| 1,024 | 0.10 M | 0.85 M | 169 M | 199× |
-| 4,096 | 0.40 M | 3.23 M | 673 M | 208× |
-| 16,384 | 1.65 M | 11.4 M | 2.34 G | 204× |
-| 65,536 | 6.58 M | 29.3 M | 2.91 G | 99× |
-| 131,072 | 12.6 M | 37.0 M | 3.04 G | 82× |
-| 262,144 | 22.2 M | 39.9 M | 3.09 G | 77× |
+| 1,024 | 0.09 M | 0.77 M | 157 M | 204× |
+| 4,096 | 0.36 M | 2.93 M | 622 M | 212× |
+| 16,384 | 1.45 M | 10.2 M | 2.30 G | 227× |
+| 65,536 | 5.75 M | 25.2 M | 2.77 G | 110× |
+| 131,072 | 11.0 M | 31.5 M | 2.93 G | 93× |
+| 262,144 | 18.9 M | 33.8 M | 2.95 G | 87× |
 
 The kernel saturates this GPU from about 65,536 aircraft.  The torch backend launches many
 small kernels per frame; a CUDA graph removes the launch overhead but not the memory traffic
@@ -70,15 +70,15 @@ caches and memory.
 
 | aircraft | float32, 1 thread | float32, 16 threads | float64, 1 thread | float64, 16 threads |
 |---|---|---|---|---|
-| 1 | 349 | 413 | 459 | 455 |
-| 64 | 24 k | 19 k | 27 k | 20 k |
-| 1,024 | 262 k | 217 k | 245 k | 202 k |
-| 16,384 | 645 k | 936 k | 478 k | 589 k |
+| 1 | 367 | 361 | 416 | 422 |
+| 64 | 22 k | 18 k | 25 k | 19 k |
+| 1,024 | 237 k | 197 k | 222 k | 193 k |
+| 16,384 | 581 k | 860 k | 459 k | 563 k |
 
 Where it crosses JSBSim: per thread, the torch CPU backend is slower than one JSBSim core
-below a few hundred aircraft (Python and operator overhead dominate — one aircraft is 350×
-slower), passes it between 64 and 1,024 aircraft, and reaches 5.3× at 16,384 aircraft
-(float32).  With all 16 threads it reaches 0.94 M, still **below JSBSim run on every core
+below a few hundred aircraft (Python and operator overhead dominate — one aircraft is 330×
+slower), passes it between 64 and 1,024 aircraft, and reaches 4.8× at 16,384 aircraft
+(float32).  With all 16 threads it reaches 0.86 M, still **below JSBSim run on every core
 (2.38 M)**.  On a CPU-only machine, running JSBSim itself in parallel processes is the
 faster choice; the torch CPU backend is there as the reference implementation and for
 machines without a GPU.
@@ -99,7 +99,7 @@ at most `1 / (1 − p)`, however fast the simulator becomes.
 
 ### Example 1: CPU training → GPU training
 
-**One example, not a guarantee.**  The same private PPO trainer with the same 256×2 MLP
+**One example, not a guarantee** (measured with earlier builds of the simulator).  The same private PPO trainer with the same 256×2 MLP
 policy on the same PC (Ryzen 9 9950X, RTX 5070 Ti), first with JSBSim 1.3.0 on the CPU, then
 with this simulator's torch backend (+ CUDA graph) on the GPU:
 

@@ -97,6 +97,7 @@ def _core_consts(dbl: bool) -> str:
         FF_UP=FF_RATE_UP_PPH_S * DT_PHYS / 3600.0,
         FF_DN=FF_RATE_DOWN_PPH_S * DT_PHYS / 3600.0,
         R_EARTH=RB.R_EARTH, RH_REF=RB.R_EARTH + RB.H_REF,
+        WGS84_A=RB.WGS84_A, WGS84_E2=RB.WGS84_E2,
         AB3_0=23.0 / 12.0, AB3_1=16.0 / 12.0, AB3_2=5.0 / 12.0,
         ATM_EARTH_R=PR._EARTH_R, ATM_G0=PR._G0, ATM_R=PR._R_ENG, ATM_GAMMA=PR._GAMMA,
         RHO_SL_TURB=PR._RHO_SL,
@@ -396,7 +397,7 @@ struct Pre {
     REAL web_x, web_y, web_z, wix, wiy, wiz;
 };
 // 위도·중력 (인스턴스마다 다르다 -- 커널 인자로 받는다)
-struct Env { REAL G0, WE_N, WE_D, ACENT_D; };
+struct Env { REAL G0, WE_N, WE_D, ACENT_D, PROJ, LAT0, COS_LAT0; };
 
 // 상태 포인터 -- torch 플랜트의 텐서들 (제자리에서 읽고 쓴다)
 struct CorePtr {
@@ -730,10 +731,22 @@ __device__ __forceinline__ void core_post(Core& c, const Pre& s, const Env& E,
     c.hu2x = c.hu1x; c.hu2y = c.hu1y; c.hu2z = c.hu1z; c.hu1x = c.hu0x; c.hu1y = c.hu0y; c.hu1z = c.hu0z;
     c.hu0x = anN; c.hu0y = anE; c.hu0z = anD;
     c.hp2x = c.hp1x; c.hp2y = c.hp1y; c.hp2z = c.hp1z; c.hp1x = c.hp0x; c.hp1y = c.hp0y; c.hp1z = c.hp0z;
-    c.hp0x = s.vn; c.hp0y = s.ve; c.hp0z = s.vd;
+    // 수평 위치를 지리좌표 투영(구면 R) 단위로 적분하는 판 (E.PROJ) -- 위치 미분만 바꾼다
+    REAL pvn = s.vn, pve = s.ve;
+    if (E.PROJ != (REAL)0) {
+        REAL lat = E.LAT0 + c.pn / R_EARTH;
+        REAL sl = SIN(lat);
+        REAL ww = (REAL)1 - (REAL)WGS84_E2 * sl * sl;
+        REAL nr = (REAL)WGS84_A / SQRT(ww);
+        REAL mr = nr * ((REAL)1 - (REAL)WGS84_E2) / ww;
+        REAL hh = -c.pd;
+        pvn = s.vn * (R_EARTH / (mr + hh));
+        pve = s.ve * (R_EARTH * E.COS_LAT0 / ((nr + hh) * COS(lat)));
+    }
+    c.hp0x = pvn; c.hp0y = pve; c.hp0z = s.vd;
     if (c.fr) {
         c.hu1x = c.hu2x = anN; c.hu1y = c.hu2y = anE; c.hu1z = c.hu2z = anD;
-        c.hp1x = c.hp2x = s.vn; c.hp1y = c.hp2y = s.ve; c.hp1z = c.hp2z = s.vd;
+        c.hp1x = c.hp2x = pvn; c.hp1y = c.hp2y = pve; c.hp1z = c.hp2z = s.vd;
     }
     if (d) {
         d[0] = s.alpha; d[1] = s.beta; d[2] = s.mach; d[3] = s.qbar; d[4] = s.vc_kts; d[5] = s.vg_fps;
@@ -816,7 +829,7 @@ __device__ __forceinline__ void core_post(Core& c, const Pre& s, const Env& E,
     REAL* __restrict__ cgt_b, const REAL* __restrict__ env
 #define CORE_PTR CorePtr P = {pos, uvw, quat, pqr, fresh, hu, hp, fst, n2_b, n2n_b, fuel_b, ff_b, \
                               ptrim_b, ab_b, wd_b, np_b, cgt_b}; \
-                 Env E = {env[0], env[1], env[2], env[3]};
+                 Env E = {env[0], env[1], env[2], env[3], env[4], env[5], env[6]};
 """
 
 # 조종간 드라이버 -- `F16Stick.step(stick, substeps)` 와 같은 일
@@ -864,10 +877,15 @@ def core_source(aero, turb, mass, dbl: bool) -> str:
 
 
 def env_tensor(rb, device, dtype) -> torch.Tensor:
-    """`RigidBody6DOF` 의 위도·중력 상수 (G0, w_earth N, w_earth D, 원심 D)."""
-    return torch.stack((torch.tensor(rb.gravity, dtype=torch.float64),
+    """`RigidBody6DOF` 의 위도·중력 상수 (G0, w_earth N, w_earth D, 원심 D,
+    지리좌표 투영 여부, lat0, cos lat0).  투영이 없는 강체면 0 / 0 / 1."""
+    f64 = lambda v: torch.tensor(float(v), dtype=torch.float64)
+    return torch.stack((f64(rb.gravity),
                         rb.w_earth_ned[0].double().cpu(), rb.w_earth_ned[2].double().cpu(),
-                        rb.a_cent_ned[2].double().cpu())).to(device=device, dtype=dtype)
+                        rb.a_cent_ned[2].double().cpu(),
+                        f64(1.0 if getattr(rb, "_gym_proj", False) else 0.0),
+                        f64(getattr(rb, "_lat0", 0.0)),
+                        f64(getattr(rb, "_cos_lat0", 1.0)))).to(device=device, dtype=dtype)
 
 
 def check_plant(dyn) -> None:

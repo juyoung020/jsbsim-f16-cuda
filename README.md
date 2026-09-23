@@ -1,6 +1,6 @@
 # jsbsim-f16-cuda
 
-**JSBSim's F-16 as a hand-written CUDA kernel: 3.09 billion aircraft-frames per second on
+**JSBSim's F-16 as a hand-written CUDA kernel: 2.95 billion aircraft-frames per second on
 one GPU, checked frame by frame against JSBSim.**
 
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
@@ -20,12 +20,12 @@ JSBSim's numbers.
 
 ## Simulator throughput (physics only)
 
-RTX 5070 Ti and Ryzen 9 9950X (16 cores / 32 threads); float32, 6 frames per call, GPU
-otherwise idle ([conditions and all numbers](docs/benchmarks.md)):
+v0.2.1 on an RTX 5070 Ti and a Ryzen 9 9950X (16 cores / 32 threads); float32, 6 frames per
+call, GPU otherwise idle ([conditions and all numbers](docs/benchmarks.md)):
 
-- **3.09 billion aircraft-frames/s** from the CUDA kernel with 262,144 aircraft — enough to
-  fly **25 million F-16s in real time** on one GPU.
-- **25,300× JSBSim on one CPU core, 1,300× JSBSim on all 32 hardware threads** (CUDA kernel
+- **2.95 billion aircraft-frames/s** from the CUDA kernel with 262,144 aircraft — enough to
+  fly **24 million F-16s in real time** on one GPU.
+- **24,100× JSBSim on one CPU core, 1,240× JSBSim on all 32 hardware threads** (CUDA kernel
   vs. JSBSim `run()`, physics only).
 - **Control surfaces identical to JSBSim** in a one-frame comparison (error 0).
 
@@ -35,12 +35,12 @@ otherwise idle ([conditions and all numbers](docs/benchmarks.md)):
 |---|---|---|---|
 | JSBSim 1.3.0, 1 process | 122 k | 8.2 µs | 1× |
 | JSBSim 1.3.0, 32 processes | 2.38 M | 0.42 µs | 20× |
-| torch CPU backend, 16,384 aircraft, 16 threads | 0.94 M | 1.1 µs | 7.7× |
-| torch GPU backend + CUDA graph, 262,144 aircraft | 39.9 M | 25 ns | 327× |
-| **CUDA kernel, 262,144 aircraft** | **3.09 G** | **0.32 ns** | **25,300×** |
+| torch CPU backend, 16,384 aircraft, 16 threads | 0.86 M | 1.2 µs | 7.0× |
+| torch GPU backend + CUDA graph, 262,144 aircraft | 33.8 M | 30 ns | 277× |
+| **CUDA kernel, 262,144 aircraft** | **2.95 G** | **0.34 ns** | **24,100×** |
 
 Cost = 1 / throughput (amortised over the batch).  One 20 Hz decision step (6 frames) costs
-6× that: 49 µs of JSBSim on one core versus 1.9 ns in the kernel, per aircraft.
+6× that: 49 µs of JSBSim on one core versus 2.0 ns in the kernel, per aircraft.
 
 ## What it means for training
 
@@ -51,8 +51,9 @@ rewards and the learning algorithm:
 `speedup = (T_sim_old + T_rest) / (T_sim_new + T_rest)` — if the simulator is a fraction
 `p` of your current training time, the speedup is at most `1 / (1 − p)`.
 
-One example, not a guarantee — the same private PPO trainer (256×2 MLP policy) on the same
-PC, first with JSBSim on the CPU, then with this simulator on the GPU (torch backend + CUDA graph):
+One example, not a guarantee (measured with earlier builds) — the same private PPO trainer
+(256×2 MLP policy) on the same PC, first with JSBSim on the CPU, then with this simulator on
+the GPU (torch backend + CUDA graph):
 
 | training pipeline | env-steps/s, end-to-end | vs. CPU pipeline |
 |---|---|---|

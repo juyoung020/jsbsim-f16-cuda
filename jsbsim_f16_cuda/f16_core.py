@@ -437,7 +437,8 @@ class F16Stick:
                  lat0_deg: float = 0.0, mass: str = "tanks", refuel: bool = False,
                  fuel_lbs=None, gravity_ms2: float | None = None,
                  integrator: str = "jsbsim", tables: str | None = None,
-                 trim_table: str | None = TRIM_TABLE) -> None:
+                 trim_table: str | None = TRIM_TABLE,
+                 ) -> None:
         self.n = self.N = int(n)
         self.device = torch.device(device)
         self.dtype = dtype
@@ -490,7 +491,7 @@ class F16Stick:
                                                              dtype=torch.bool))
 
     def _seed_common(self, m0, alpha0, ptrim, ele_rad, n2_0, v_ned, h_ft, speed,
-                     stick0, fuel0) -> None:
+                     stick0, fuel0, a_trim=None, npz0=None) -> None:
         """강체를 뺀 나머지 상태(FLCS 지연버퍼, 엔진, 연료, 직전 비력·스틱)를 트림 값으로 민다."""
         m1 = m0.unsqueeze(-1)
 
@@ -503,7 +504,8 @@ class F16Stick:
         vg0 = torch.hypot(v_ned[..., 0], v_ned[..., 1]) / FT
         tef = tef_control_seed(vc0, mach0)
         self.flcs.reset(mask=m0, alpha_rad=alpha0,
-                        n_pilot_z_norm=torch.full_like(speed, -1.0),
+                        n_pilot_z_norm=(torch.full_like(speed, -1.0) if npz0 is None
+                                        else npz0),
                         mach=mach0, vc_kts=vc0, vg_fps=vg0,
                         ele_pos_norm=ele_rad / ELEVATOR_RANGE_RAD,
                         tef_control=tef)
@@ -516,13 +518,17 @@ class F16Stick:
         if self._tank:
             put(self._cg_tank, self.mass.props(fuel0)[1])
         put(self.ff_pps, torch.zeros_like(speed))
-        ct, st_ = torch.cos(alpha0), torch.sin(alpha0)
-        a_trim = torch.stack((G_STD_FPS2 * st_, torch.zeros_like(ct),
-                              -G_STD_FPS2 * ct), dim=-1)
+        if a_trim is None:
+            ct, st_ = torch.cos(alpha0), torch.sin(alpha0)
+            a_trim = torch.stack((G_STD_FPS2 * st_, torch.zeros_like(ct),
+                                  -G_STD_FPS2 * ct), dim=-1)
+            npil = torch.zeros_like(self.n_pilot)
+            npil[:, 0], npil[:, 2] = st_, -ct
+        else:
+            # 트림 표가 잰 트림 프레임의 비중력 비력을 그대로 (`reset_contract`)
+            npil = a_trim / G_STD_FPS2
         put(self.a_body, a_trim)
         put(self.wdot_i, torch.zeros_like(self.wdot_i))
-        npil = torch.zeros_like(self.n_pilot)
-        npil[:, 0], npil[:, 2] = st_, -ct
         put(self.n_pilot, npil)
         put(self.stick, stick0)
 

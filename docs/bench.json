@@ -5,12 +5,12 @@
   "torch_threads": 16,
   "torch": "2.11.0+cu128",
   "gpu": "NVIDIA GeForce RTX 5070 Ti",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "seconds": 4.0,
   "substeps": 6,
-  "date": "2026-09-23",
+  "date": "2026-09-24",
   "jsbsim": "1.3.0",
-  "note": "GPU runs: no other compute jobs (GPU utilisation 0-16 % before/after), best of two runs. CPU runs: light background load (5-15 %). This port: float32, 6 frames per call, manoeuvring fleet re-trimmed every 10 s of flight (excluded)."
+  "note": "v0.2.x with inertial-frame velocity integration. GPU runs: no other compute jobs (GPU utilisation 0 % before/after), best of two runs (< 3 % apart). CPU runs: light background load (3-6 %). JSBSim numbers from 2026-09-23 (JSBSim itself unchanged). float32, 6 frames per call, manoeuvring fleet re-trimmed every 10 s of flight (excluded)."
  },
  "rows": [
   {
@@ -56,172 +56,172 @@
   {
    "backend": "torch CPU float32, 1 thread",
    "config": "1 aircraft",
-   "rate": 349.29606349583037
+   "rate": 367.35087875243823
   },
   {
    "backend": "torch CPU float32, 1 thread",
    "config": "64 aircraft",
-   "rate": 24182.86371402228
+   "rate": 21623.860058391754
   },
   {
    "backend": "torch CPU float32, 1 thread",
    "config": "1,024 aircraft",
-   "rate": 262027.49430104703
+   "rate": 236828.19608140687
   },
   {
    "backend": "torch CPU float32, 1 thread",
    "config": "16,384 aircraft",
-   "rate": 645083.893220748
+   "rate": 580806.4951563581
   },
   {
    "backend": "torch CPU float32, 16 threads",
    "config": "1 aircraft",
-   "rate": 413.074990847574
+   "rate": 360.76993086883067
   },
   {
    "backend": "torch CPU float32, 16 threads",
    "config": "64 aircraft",
-   "rate": 19142.827075707544
+   "rate": 17703.957628698387
   },
   {
    "backend": "torch CPU float32, 16 threads",
    "config": "1,024 aircraft",
-   "rate": 216717.33186481652
+   "rate": 197409.19641834806
   },
   {
    "backend": "torch CPU float32, 16 threads",
    "config": "16,384 aircraft",
-   "rate": 935807.6522246072
+   "rate": 859722.1268057454
   },
   {
    "backend": "torch CPU float64, 1 thread",
    "config": "1 aircraft",
-   "rate": 459.3371993657106
+   "rate": 416.2798484130238
   },
   {
    "backend": "torch CPU float64, 1 thread",
    "config": "64 aircraft",
-   "rate": 27243.46591888928
+   "rate": 25294.57860902464
   },
   {
    "backend": "torch CPU float64, 1 thread",
    "config": "1,024 aircraft",
-   "rate": 244736.49362901438
+   "rate": 222141.55892056666
   },
   {
    "backend": "torch CPU float64, 1 thread",
    "config": "16,384 aircraft",
-   "rate": 478428.532801171
+   "rate": 459363.79908227024
   },
   {
    "backend": "torch CPU float64, 16 threads",
    "config": "1 aircraft",
-   "rate": 455.20932416516365
+   "rate": 421.74470387617225
   },
   {
    "backend": "torch CPU float64, 16 threads",
    "config": "64 aircraft",
-   "rate": 19864.195357762328
+   "rate": 19327.034936686072
   },
   {
    "backend": "torch CPU float64, 16 threads",
    "config": "1,024 aircraft",
-   "rate": 201532.116024094
+   "rate": 192597.3559036443
   },
   {
    "backend": "torch CPU float64, 16 threads",
    "config": "16,384 aircraft",
-   "rate": 589169.6828783749
+   "rate": 563149.306784611
   },
   {
    "backend": "torch GPU eager",
    "config": "1,024 aircraft",
-   "rate": 100639.44046590659
+   "rate": 85077.03404201964
   },
   {
    "backend": "torch GPU + CUDA graph",
    "config": "1,024 aircraft",
-   "rate": 850168.7600527052
+   "rate": 766888.087956061
   },
   {
    "backend": "CUDA kernel",
    "config": "1,024 aircraft",
-   "rate": 168770645.0215073
+   "rate": 156830032.0534366
   },
   {
    "backend": "torch GPU eager",
    "config": "4,096 aircraft",
-   "rate": 402124.55808143696
+   "rate": 361450.4717973833
   },
   {
    "backend": "torch GPU + CUDA graph",
    "config": "4,096 aircraft",
-   "rate": 3229641.103601502
+   "rate": 2934680.491607782
   },
   {
    "backend": "CUDA kernel",
    "config": "4,096 aircraft",
-   "rate": 672772966.5158089
+   "rate": 622237543.0276369
   },
   {
    "backend": "torch GPU eager",
    "config": "16,384 aircraft",
-   "rate": 1654441.7892778958
+   "rate": 1447629.37436885
   },
   {
    "backend": "torch GPU + CUDA graph",
    "config": "16,384 aircraft",
-   "rate": 11429097.980455812
+   "rate": 10155835.560394157
   },
   {
    "backend": "CUDA kernel",
    "config": "16,384 aircraft",
-   "rate": 2336520888.1207247
+   "rate": 2302254892.3789253
   },
   {
    "backend": "torch GPU eager",
    "config": "65,536 aircraft",
-   "rate": 6575039.560247116
+   "rate": 5750714.72975836
   },
   {
    "backend": "torch GPU + CUDA graph",
    "config": "65,536 aircraft",
-   "rate": 29253719.891664866
+   "rate": 25199035.118628833
   },
   {
    "backend": "CUDA kernel",
    "config": "65,536 aircraft",
-   "rate": 2909077724.381192
+   "rate": 2770802323.0856056
   },
   {
    "backend": "torch GPU eager",
    "config": "131,072 aircraft",
-   "rate": 12570742.716465663
+   "rate": 10966207.078058248
   },
   {
    "backend": "torch GPU + CUDA graph",
    "config": "131,072 aircraft",
-   "rate": 37030547.20046352
+   "rate": 31501345.05085098
   },
   {
    "backend": "CUDA kernel",
    "config": "131,072 aircraft",
-   "rate": 3040487501.1901116
+   "rate": 2932639040.2930655
   },
   {
    "backend": "torch GPU eager",
    "config": "262,144 aircraft",
-   "rate": 22172091.451745763
+   "rate": 18851173.892552633
   },
   {
    "backend": "torch GPU + CUDA graph",
    "config": "262,144 aircraft",
-   "rate": 39919019.31082463
+   "rate": 33809933.604005046
   },
   {
    "backend": "CUDA kernel",
    "config": "262,144 aircraft",
-   "rate": 3091636723.8171186
+   "rate": 2945426326.6439877
   }
  ]
 }
